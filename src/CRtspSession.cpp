@@ -11,69 +11,72 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// #include <time.h>
+#include <time.h>
 
 #include "JPEGSamples.h"
 
-CRtspSession::CRtspSession(int aRtspClient, CStreamer* aStreamer):m_RtspClient(aRtspClient),m_Streamer(aStreamer)
+RTSPSession::RTSPSession(int aRtspClient, CStreamer* aStreamer):
+    _rtspClient(aRtspClient), _streamer(aStreamer)
 {
-    Init();
+    _init();
 
-    m_RtspSessionID  = rand() << 16;         // create a session ID
-    m_RtspSessionID |= rand();
-    m_RtspSessionID |= 0x80000000;         
-    m_StreamID       = -1;
-    m_ClientRTPPort  =  0;
-    m_ClientRTCPPort =  0;
-    m_TcpTransport   =  false;
+    // create a session ID
+    {
+        _rtspSessionID = rand() << 16;
+        _rtspSessionID |= rand();
+        _rtspSessionID |= 0x80000000;         
+    }
+    _streamID = -1;
+    _clientRTPPort = 0;
+    _clientRTCPPort = 0;
+    _tcpTransport = false;
 };
 
-CRtspSession::~CRtspSession()
+RTSPSession::~RTSPSession() {};
+
+RetCode RTSPSession::_init()
 {
+    _rtspCmdType = RTSP_UNDEFINED;
+    memset(_URLPreSuffix, 0, sizeof(_URLPreSuffix));
+    memset(_URLSuffix, 0, sizeof(_URLSuffix));
+    memset(_cmdSeq, 0, sizeof(_cmdSeq));
+    memset(_URLHostPort, 0, sizeof(_URLHostPort));
+    _сontentLength  =  0;
+    return RetCode::RC_SUCCESS;
 };
 
-void CRtspSession::Init()
+RetCode RTSPSession::_parseRtspRequest(char const* aRequest, const size_t aRequestSize)
 {
-    m_RtspCmdType   = RTSP_UNDEFINED;
-    memset(m_URLPreSuffix, 0x00, sizeof(m_URLPreSuffix));
-    memset(m_URLSuffix,    0x00, sizeof(m_URLSuffix));
-    memset(m_CSeq,         0x00, sizeof(m_CSeq));
-    memset(m_URLHostPort,  0x00, sizeof(m_URLHostPort));
-    m_ContentLength  =  0;
-};
+    char    cmdName[RTSP_PARAM_STRING_MAX + 1];
+    char    curRequest[RTSP_BUFFER_SIZE + 1];
 
-bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize)
-{
-    char     CmdName[RTSP_PARAM_STRING_MAX];
-    char     CurRequest[RTSP_BUFFER_SIZE];
-    unsigned CurRequestSize; 
-
-    Init();
-    CurRequestSize = aRequestSize;
-    memcpy(CurRequest,aRequest,aRequestSize);
+    _init();
+    size_t curRequestSize = aRequestSize;
+    memcpy(curRequest, aRequest, aRequestSize);
 
     // check whether the request contains information about the RTP/RTCP UDP client ports (SETUP command)
 
-    char* ClientPortPtr = strstr(CurRequest, "client_port");
-    if (ClientPortPtr != nullptr)
+    char* clientPortPtr = strstr(curRequest, "client_port");
+    if (clientPortPtr != NULL)
     {
-        char* TmpPtr = strstr(ClientPortPtr, "\r\n");
-        if (TmpPtr != nullptr) 
+        char* tmpPtr = strstr(clientPortPtr, "\r\n");
+        if (tmpPtr != NULL) 
         {
-            TmpPtr[0] = '\0';
-            strcpy(CP, ClientPortPtr);
-            char* pCP = strstr(CP,"=");
+            tmpPtr[0] = '\0';
+            char clientPort[RTCP_CLIENT_PORT_STR_MAX + 1];
+            strcpy(clientPort, clientPortPtr);
+            char* pCP = strstr(clientPort, "=");
             if (pCP != nullptr)
             {
                 pCP++;
-                char CP[1024];
-                strcpy(CP, pCP);
-                pCP = strstr(CP, "-");
+                char clientPort[1024];
+                strcpy(clientPort, pCP);
+                pCP = strstr(clientPort, "-");
                 if (pCP != nullptr)
                 {
                     pCP[0] = '\0';
-                    m_ClientRTPPort  = atoi(CP);
-                    m_ClientRTCPPort = m_ClientRTPPort + 1;
+                    _clientRTPPort  = atoi(clientPort);
+                    _clientRTCPPort = _clientRTPPort + 1;
                 }
             }
         }
@@ -81,76 +84,79 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
     // Read everything up to the first space as the command name
     bool parseSucceeded = false;
     unsigned i;
-    for (i = 0; i < sizeof(CmdName) - 1 && i < CurRequestSize; ++i) 
+    for (i = 0; i < sizeof(cmdName) - 1 && i < curRequestSize; ++i) 
     {
-        char c = CurRequest[i];
+        char c = curRequest[i];
         if (c == ' ' || c == '\t') 
         {
             parseSucceeded = true;
             break;
         }
-        CmdName[i] = c;
+        cmdName[i] = c;
     }
-    CmdName[i] = '\0';
+    cmdName[i] = '\0';
     if (false == parseSucceeded)
-        return false;
+        return RC_ERR_RTSP_BAD_PARSING;
 
     // find out the command type
-    if (strstr(CmdName, "OPTIONS") != NULL)
+    if (strstr(cmdName, "OPTIONS") != NULL)
     {
-        m_RtspCmdType = RTSP_OPTIONS;
+        _rtspCmdType = RTSP_OPTIONS;
     }
-    else if (strstr(CmdName, "DESCRIBE") != NULL)
+    else if (strstr(cmdName, "DESCRIBE") != NULL)
     {
-        m_RtspCmdType = RTSP_DESCRIBE;
+        _rtspCmdType = RTSP_DESCRIBE;
     }
-    else if (strstr(CmdName, "SETUP") != NULL)
+    else if (strstr(cmdName, "SETUP") != NULL)
     {
-        m_RtspCmdType = RTSP_SETUP;
+        _rtspCmdType = RTSP_SETUP;
+        // check whether the request contains transport information (UDP or TCP)
+        char* tmpPtr = strstr(curRequest, "RTP/AVP/TCP");
+        _tcpTransport = (tmpPtr != NULL) ? true : false;
     }
-    else if (strstr(CmdName,"PLAY") != NULL)
+    else if (strstr(cmdName, "PLAY") != NULL)
     {
-        m_RtspCmdType = RTSP_PLAY;
+        _rtspCmdType = RTSP_PLAY;
     }
-    else if (strstr(CmdName,"TEARDOWN") != NULL)
+    else if (strstr(cmdName,"TEARDOWN") != NULL)
     {
-        m_RtspCmdType = RTSP_TEARDOWN;
+        _rtspCmdType = RTSP_TEARDOWN;
     }
-
-    // check whether the request contains transport information (UDP or TCP)
-    if (m_RtspCmdType == RTSP_SETUP)
-    {
-        char* TmpPtr = strstr(CurRequest,"RTP/AVP/TCP");
-        m_TcpTransport = (TmpPtr != NULL) ? true : false;
-    };
 
     // Skip over the prefix of any "rtsp://" or "rtsp:/" URL that follows:
-    unsigned j = i + 1;
-    while (j < CurRequestSize && (CurRequest[j] == ' ' || CurRequest[j] == '\t'))
+    size_t j = i + 1;
+    while (j < curRequestSize && (curRequest[j] == ' ' || curRequest[j] == '\t'))
     {
         ++j; // skip over any additional white space
     }
-    for (; (int)j < (int)(CurRequestSize-8); ++j) 
+    for (; (int)j < (int)(curRequestSize - 8); ++j) 
     {
-        if ((CurRequest[j]   == 'r' || CurRequest[j]   == 'R')   && 
-            (CurRequest[j+1] == 't' || CurRequest[j+1] == 'T') && 
-            (CurRequest[j+2] == 's' || CurRequest[j+2] == 'S') && 
-            (CurRequest[j+3] == 'p' || CurRequest[j+3] == 'P') && 
-             CurRequest[j+4] == ':' && CurRequest[j+5] == '/') 
+        constexpr size_t RTSP_STR_LEN = 6;
+        if (strncmp("rtsp:/", curRequest + j,  RTSP_STR_LEN) == 0 ||
+            strncmp("RTSP:/", curRequest + j,  RTSP_STR_LEN) == 0)
         {
             j += 6;
-            if (CurRequest[j] == '/') 
+            if (curRequest[j] == '/') 
             {   // This is a "rtsp://" URL; skip over the host:port part that follows:
                 ++j;
-                unsigned uidx = 0;
-                while (j < CurRequestSize && CurRequest[j] != '/' && CurRequest[j] != ' ') 
-                {   // extract the host:port part of the URL here
-                    m_URLHostPort[uidx] = CurRequest[j];
+                size_t uidx = 0;
+                while (j < curRequestSize) 
+                { 
+                    //until '/' or ' '
+                    if (curRequest[j] == '/' || curRequest[j] == ' ')
+                    {
+                        break ;
+                    }
+                    // extract the host:port part of the URL here
+                    _URLHostPort[uidx] = curRequest[j];
                     uidx++;
                     ++j;
-                };
+                }
             } 
-            else --j;
+            else
+            {
+                --j;
+            }
             i = j;
             break;
         }
@@ -158,15 +164,16 @@ bool CRtspSession::ParseRtspRequest(char const * aRequest, unsigned aRequestSize
 
     // Look for the URL suffix (before the following "RTSP/"):
     parseSucceeded = false;
-    for (unsigned k = i+1; (int)k < (int)(CurRequestSize-5); ++k) 
+    for (size_t k = i + 1; (int)k < (int)(curRequestSize - 5); ++k) 
     {
-        if (CurRequest[k]   == 'R'   && CurRequest[k+1] == 'T'   && 
-            CurRequest[k+2] == 'S'   && CurRequest[k+3] == 'P'   && 
-            CurRequest[k+4] == '/') 
+        if (strncmp("RTSP/", curRequest, 5) == 0)
         {
-            while (--k >= i && CurRequest[k] == ' ') {}
-            unsigned k1 = k;
-            while (k1 > i && CurRequest[k1] != '/') --k1;
+            while (--k >= i && curRequest[k] == ' ');
+            size_t k1 = k;
+            while (k1 > i && curRequest[k1] != '/')
+            {
+                --k1;
+            }
             if (k - k1 + 1 > sizeof(m_URLSuffix)) return false;
             unsigned n = 0, k2 = k1+1;
 

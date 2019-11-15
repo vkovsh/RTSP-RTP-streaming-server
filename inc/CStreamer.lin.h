@@ -11,12 +11,14 @@ public:
     ~CStreamer();
 
     void        InitTransport(uint16_t aRtpPort, uint16_t aRtcpPort, bool TCP);
-    uint16_t    GetRtpServerPort();
-    uint16_t    GetRtcpServerPort();
     void        StreamImage(int StreamID);
 
+public:
+    uint16_t    GetRtpServerPort(void) const;
+    uint16_t    GetRtcpServerPort(void) const;
+
 private:
-    void    SendRtpPacket(char* Jpeg, int JpegLen, int Chn);
+    RetCode     SendRtpPacket(char* Jpeg, int JpegLen, int Chn);
 
     int         m_RtpSocket;          // RTP socket for streaming RTP packets to client
     int         m_RtcpSocket;         // RTCP socket for sending/receiving RTCP packages

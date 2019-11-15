@@ -7,45 +7,52 @@
 #include <stdint.h> 
 #include "CStreamer.lin.h"
 #include "rtsp_cmd_codes.h"
+#include "RetCode.h"
 
 #define RTSP_BUFFER_SIZE       10000    // for incoming requests, and outgoing responses
-#define RTSP_PARAM_STRING_MAX  200  
+#define RTSP_PARAM_STRING_MAX  200
+#define RTCP_CLIENT_PORT_STR_MAX 256  
 
-class CRtspSession
+class RTSPSession
 {
 public:
-    CRtspSession(int aRtspClient, CStreamer* aStreamer);
-    ~CRtspSession();
+    RTSPSession(int aRtspClient, CStreamer* aStreamer);
+    ~RTSPSession(void);
 
-    RTSP_Code   Handle_RtspRequest(char const* aRequest, unsigned aRequestSize);
-    int         GetStreamID();
+    RetCode   Handle_RtspRequest(RTSP_Code& rtsp_code,
+                                    char const* aRequest,
+                                    const uint32_t aRequestSize);
+
+public:
+    int getStreamID(void) const;
 
 private:
-    void Init();
-    bool ParseRtspRequest(char const * aRequest, unsigned aRequestSize);
-    char const* DateHeader();
+    RetCode _init();
+    RetCode _parseRtspRequest(char const* aRequest, const size_t aRequestSize);
+    char const* _dateHeader();
 
+private:
     // RTSP request command handlers
-    void Handle_RtspOPTION();
-    void Handle_RtspDESCRIBE();
-    void Handle_RtspSETUP(); 
-    void Handle_RtspPLAY();
+    RetCode _handle_RtspOPTION();
+    RetCode _handle_RtspDESCRIBE();
+    RetCode _handle_RtspSETUP(); 
+    RetCode _handle_RtspPLAY();
 
+private:
     // global session state parameters
-    int         m_RtspSessionID;
-    int         m_RtspClient;                              // RTSP socket of that session
-    int         m_StreamID;                                // number of simulated stream of that session
-    uint16_t    m_ClientRTPPort;                           // client port for UDP based RTP transport
-    uint16_t    m_ClientRTCPPort;                          // client port for UDP based RTCP transport  
-    bool        m_TcpTransport;                            // if Tcp based streaming was activated
-    CStreamer*  m_Streamer;                                // the UDP or TCP streamer of that session
+    int         _rtspSessionID;                         // session id
+    int         _rtspClient;                            // RTSP socket of that session
+    int         _streamID;                              // number of simulated stream of that session
+    uint16_t    _clientRTPPort;                         // client port for UDP based RTP transport
+    uint16_t    _clientRTCPPort;                        // client port for UDP based RTCP transport  
+    bool        _tcpTransport;                          // if Tcp based streaming was activated
+    CStreamer*  _streamer;                              // the UDP or TCP streamer of that session
 
     // parameters of the last received RTSP request
-
-    RTSP_Code   m_RtspCmdType;                             // command type (if any) of the current request
-    char        m_URLPreSuffix[RTSP_PARAM_STRING_MAX];     // stream name pre suffix 
-    char        m_URLSuffix[RTSP_PARAM_STRING_MAX];        // stream name suffix
-    char        m_CSeq[RTSP_PARAM_STRING_MAX];             // RTSP command sequence number
-    char        m_URLHostPort[RTSP_BUFFER_SIZE];           // host:port part of the URL
-    unsigned    m_ContentLength;                           // SDP string size
+    RTSP_Code   _rtspCmdType;                           // command type (if any) of the current request
+    char        _URLPreSuffix[RTSP_PARAM_STRING_MAX];   // stream name pre suffix 
+    char        _URLSuffix[RTSP_PARAM_STRING_MAX];      // stream name suffix
+    char        _cmdSeq[RTSP_PARAM_STRING_MAX];         // RTSP command sequence number
+    char        _URLHostPort[RTSP_BUFFER_SIZE];         // host:port part of the URL
+    unsigned    _сontentLength;                         // SDP string size
 };
