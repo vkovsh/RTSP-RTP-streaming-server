@@ -17,13 +17,13 @@ public:
     CRtspSession(int aRtspClient, CStreamer* aStreamer);
     ~CRtspSession();
 
-    RTSP_Code   Handle_RtspRequest(char const * aRequest, unsigned aRequestSize);
+    RTSP_Code   Handle_RtspRequest(char const* aRequest, unsigned aRequestSize);
     int         GetStreamID();
 
 private:
     void Init();
     bool ParseRtspRequest(char const * aRequest, unsigned aRequestSize);
-    char const * DateHeader();
+    char const* DateHeader();
 
     // RTSP request command handlers
     void Handle_RtspOPTION();
