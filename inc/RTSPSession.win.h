@@ -6,7 +6,7 @@
 
 #include <Winsock2.h>
 #include <windows.h>  
-#include "CStreamer.win.h"
+#include "Streamer.win.h"
 #include "rtsp_cmd_codes.h"
 
 #define RTSP_BUFFER_SIZE       10000    // for incoming requests, and outgoing responses

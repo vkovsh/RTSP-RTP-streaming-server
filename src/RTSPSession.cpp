@@ -16,7 +16,7 @@
 
 #include "JPEGSamples.h"
 
-RTSPSession::RTSPSession(int aRtspClient, CStreamer* aStreamer):
+RTSPSession::RTSPSession(int aRtspClient, Streamer* aStreamer):
     _rtspClient(aRtspClient), _streamer(aStreamer)
 {
     _init();
@@ -300,7 +300,7 @@ RetCode RTSPSession::_handle_RtspOPTION()
     char   response[1024];
 
     RetCode ret = RC_ERR;
-    _snprintf(response, sizeof(response),
+    snprintf(response, sizeof(response),
         "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
         "Public: DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE\r\n\r\n", _cmdSeq);
 
@@ -315,35 +315,52 @@ RetCode RTSPSession::_handle_RtspOPTION()
     return ret;
 }
 
-RetCode RTSPSession::Handle_RtspDESCRIBE()
+RetCode RTSPSession::_handle_RtspDESCRIBE()
 {
-    char   Response[1024];
-    char   SDPBuf[1024];
-    char   URLBuf[1024];
+    constexpr size_t RESPONSE_SIZE = 1024;
+    char   response[RESPONSE_SIZE + 1];
+    constexpr size_t SPD_SIZE = 1024;
+    char   SDPBuf[SPD_SIZE + 1];
+    constexpr size_t URL_BUF = 1024;
+    char   URLBuf[URL_BUF + 1];
 
     // check whether we know a stream with the URL which is requested
-    m_StreamID = -1;        // invalid URL
-    if ((strcmp(m_URLPreSuffix,"mjpeg") == 0) && (strcmp(m_URLSuffix,"1") == 0)) m_StreamID = 0; else
-    if ((strcmp(m_URLPreSuffix,"mjpeg") == 0) && (strcmp(m_URLSuffix,"2") == 0)) m_StreamID = 1;
-    if (m_StreamID == -1)
-    {   // Stream not available
-        _snprintf(Response,sizeof(Response),
+    _streamID = -1;        // invalid URL
+    if ((strcmp(_URLPreSuffix, "mjpeg") == 0) &&
+        (strcmp(_URLSuffix, "1") == 0))
+    {
+        _streamID = 0;
+    }
+    else if ((strcmp(_URLPreSuffix, "mjpeg") == 0) &&
+        (strcmp(_URLSuffix, "2") == 0))
+    {
+        _streamID = 1;
+    }
+    if (_streamID == -1)
+    {
+        // Stream not available
+        snprintf(response,
+            RESPONSE_SIZE,
             "RTSP/1.0 404 Stream Not Found\r\nCSeq: %s\r\n%s\r\n",
-            m_CSeq, 
-            DateHeader());
+            _cmdSeq, 
+            _dateHeader());
 
-        send(m_RtspClient,Response,strlen(Response),0);   
-        return;
+        if (-1 == send(_rtspClient, response, RESPONSE_SIZE, 0))
+        {
+            return RC_ERR_BAD_TRANSMIT_TO_SOCKET;
+        }
+        return RC_ERR_STREAM_NOT_FOUND;
     };
 
     // simulate DESCRIBE server response
     char OBuf[256];
     char * ColonPtr;
-    strcpy(OBuf,m_URLHostPort);
-    ColonPtr = strstr(OBuf,":");
-    if (ColonPtr != nullptr) ColonPtr[0] = 0x00;
+    strcpy(OBuf, _URLHostPort);
+    ColonPtr = strstr(OBuf, ":");
+    if (ColonPtr != NULL)
+        ColonPtr[0] = 0x00;
 
-    _snprintf(SDPBuf,sizeof(SDPBuf),
+    snprintf(SDPBuf,sizeof(SDPBuf),
         "v=0\r\n"
         "o=- %d 1 IN IP4 %s\r\n"           
         "s=\r\n"
@@ -353,89 +370,131 @@ RetCode RTSPSession::Handle_RtspDESCRIBE()
         rand(),
         OBuf);
     char StreamName[64];
-    switch (m_StreamID)
+    switch (_streamID)
     {
-        case 0: strcpy(StreamName,"mjpeg/1"); break;
-        case 1: strcpy(StreamName,"mjpeg/2"); break;
+        case 0: strcpy(StreamName, "mjpeg/1"); break;
+        case 1: strcpy(StreamName, "mjpeg/2"); break;
     };
-    _snprintf(URLBuf,sizeof(URLBuf),
+    snprintf(URLBuf, sizeof(URLBuf),
         "rtsp://%s/%s",
-        m_URLHostPort,
+        _URLHostPort,
         StreamName);
-    _snprintf(Response,sizeof(Response),
+    snprintf(response,sizeof(response),
         "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
         "%s\r\n"
         "Content-Base: %s/\r\n"
         "Content-Type: application/sdp\r\n"
         "Content-Length: %d\r\n\r\n"
         "%s",
-        m_CSeq,
-        DateHeader(),
+        _cmdSeq,
+        _dateHeader(),
         URLBuf,
         strlen(SDPBuf),
         SDPBuf);
 
-    send(m_RtspClient,Response,strlen(Response),0);   
+    RetCode ret = RC_ERR;
+    if (-1 == send(_rtspClient, response, RESPONSE_SIZE, 0))
+    {
+        return RC_ERR_BAD_TRANSMIT_TO_SOCKET;
+    }
+    else
+    {
+        ret = RC_SUCCESS;
+    }
+    return ret;
 }
 
-void CRtspSession::Handle_RtspSETUP()
+RetCode RTSPSession::_handle_RtspSETUP()
 {
-    char Response[1024];
-    char Transport[255];
+    constexpr size_t RESPONSE_SIZE = 1024;
+    char response[RESPONSE_SIZE + 1];
+    constexpr size_t TRANSPORT_SIZE = 255;
+    char transport[TRANSPORT_SIZE + 1];
 
     // init RTP streamer transport type (UDP or TCP) and ports for UDP transport
-    m_Streamer->InitTransport(m_ClientRTPPort,m_ClientRTCPPort,m_TcpTransport);
+    _streamer->InitTransport(_clientRTPPort,
+                _clientRTCPPort,
+                _tcpTransport);
 
     // simulate SETUP server response
-    if (m_TcpTransport)
-        _snprintf(Transport,sizeof(Transport),"RTP/AVP/TCP;unicast;interleaved=0-1");
+    if (_tcpTransport == true)
+    {
+        snprintf(transport,
+            TRANSPORT_SIZE,
+            "RTP/AVP/TCP;unicast;interleaved=0-1");
+    }
     else
-        _snprintf(Transport,sizeof(Transport),
+    {
+        snprintf(transport,
+            TRANSPORT_SIZE,
             "RTP/AVP;unicast;destination=127.0.0.1;source=127.0.0.1;client_port=%i-%i;server_port=%i-%i",
-            m_ClientRTPPort,
-            m_ClientRTCPPort,
-            m_Streamer->GetRtpServerPort(),
-            m_Streamer->GetRtcpServerPort());
-    _snprintf(Response,sizeof(Response),
+            _clientRTPPort,
+            _clientRTCPPort,
+            _streamer->getRtpServerPort(),
+            _streamer->getRtcpServerPort());
+    }
+    snprintf(response,
+        RESPONSE_SIZE,
         "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
         "%s\r\n"
         "Transport: %s\r\n"
         "Session: %i\r\n\r\n",
-        m_CSeq,
-        DateHeader(),
-        Transport,
-        m_RtspSessionID);
+        _cmdSeq,
+        _dateHeader(),
+        transport,
+        _rtspSessionID);
 
-    send(m_RtspClient,Response,strlen(Response),0);
+    RetCode ret = RC_ERR;
+    if (-1 == send(_rtspClient, response, RESPONSE_SIZE, 0))
+    {
+        return RC_ERR_BAD_TRANSMIT_TO_SOCKET;
+    }
+    else
+    {
+        ret = RC_SUCCESS;
+    }
+    return ret;
 }
 
-void CRtspSession::Handle_RtspPLAY()
+RetCode RTSPSession::_handle_RtspPLAY()
 {
-    char   Response[1024];
+    constexpr size_t RESPONSE_SIZE = 1024;
+    char   response[RESPONSE_SIZE + 1];
 
     // simulate SETUP server response
-    _snprintf(Response,sizeof(Response),
+    snprintf(response,
+        RESPONSE_SIZE,
         "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
         "%s\r\n"
         "Range: npt=0.000-\r\n"
         "Session: %i\r\n"
         "RTP-Info: url=rtsp://127.0.0.1:8554/mjpeg/1/track1\r\n\r\n",
-        m_CSeq,
-        DateHeader(),
-        m_RtspSessionID);
+        _cmdSeq,
+        _dateHeader(),
+        _rtspSessionID);
 
-    send(m_RtspClient,Response,strlen(Response),0);
+    RetCode ret = RC_ERR;
+    if (-1 == send(_rtspClient, response, RESPONSE_SIZE, 0))
+    {
+        return RC_ERR_BAD_TRANSMIT_TO_SOCKET;
+    }
+    else
+    {
+        ret = RC_SUCCESS;
+    }
+    return ret;
 }
 
-char const * CRtspSession::DateHeader() 
+const char* RTSPSession::_dateHeader() 
 {
-    char buf[200];    
+    constexpr size_t BUFF_SIZE = 256;
+    char buf[BUFF_SIZE + 1];    
     time_t tt = time(NULL);
     strftime(buf, sizeof buf, "Date: %a, %b %d %Y %H:%M:%S GMT", gmtime(&tt));
     return buf;
 }
 
-int CRtspSession::GetStreamID()
+int RTSPSession::getStreamID() const
 {
-    return m_StreamID;
+    return _streamID;
 };

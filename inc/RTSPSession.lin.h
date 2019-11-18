@@ -5,7 +5,7 @@
 #pragma once
 
 #include <stdint.h> 
-#include "CStreamer.lin.h"
+#include "Streamer.lin.h"
 #include "rtsp_cmd_codes.h"
 #include "RetCode.h"
 
@@ -16,7 +16,7 @@
 class RTSPSession
 {
 public:
-    RTSPSession(int aRtspClient, CStreamer* aStreamer);
+    RTSPSession(int aRtspClient, Streamer* aStreamer);
     ~RTSPSession(void);
 
     RetCode   Handle_RtspRequest(RTSP_Code& rtsp_code,
@@ -46,7 +46,7 @@ private:
     uint16_t    _clientRTPPort;                         // client port for UDP based RTP transport
     uint16_t    _clientRTCPPort;                        // client port for UDP based RTCP transport  
     bool        _tcpTransport;                          // if Tcp based streaming was activated
-    CStreamer*  _streamer;                              // the UDP or TCP streamer of that session
+    Streamer*  _streamer;                              // the UDP or TCP streamer of that session
 
     // parameters of the last received RTSP request
     RTSP_Code   _rtspCmdType;                           // command type (if any) of the current request
