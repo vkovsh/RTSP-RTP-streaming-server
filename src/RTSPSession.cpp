@@ -2,10 +2,11 @@
 // CRtspSession
 // - parsing of RTSP requests and generation of RTSP responses
 
-#ifdef __linux__ 
-# include "CRtspSession.lin.h"
+#ifdef __linux__
+#include <sys/socket.h>
+# include "RTSPSession.lin.h"
 #elif _WIN32
-# include "CRtspSession.win.h"
+# include "RTSPSession.win.h"
 #endif
 
 #include <stdio.h>
@@ -111,8 +112,7 @@ RetCode RTSPSession::_parseRtspRequest(char const* aRequest, const size_t aReque
     {
         _rtspCmdType = RTSP_SETUP;
         // check whether the request contains transport information (UDP or TCP)
-        char* tmpPtr = strstr(curRequest, "RTP/AVP/TCP");
-        _tcpTransport = (tmpPtr != NULL) ? true : false;
+        _tcpTransport = (strstr(curRequest, "RTP/AVP/TCP") != NULL) ? true : false;
     }
     else if (strstr(cmdName, "PLAY") != NULL)
     {
@@ -137,7 +137,8 @@ RetCode RTSPSession::_parseRtspRequest(char const* aRequest, const size_t aReque
         {
             j += 6;
             if (curRequest[j] == '/') 
-            {   // This is a "rtsp://" URL; skip over the host:port part that follows:
+            {
+                // This is a "rtsp://" URL; skip over the host:port part that follows:
                 ++j;
                 size_t uidx = 0;
                 while (j < curRequestSize) 
@@ -174,99 +175,147 @@ RetCode RTSPSession::_parseRtspRequest(char const* aRequest, const size_t aReque
             {
                 --k1;
             }
-            if (k - k1 + 1 > sizeof(m_URLSuffix)) return false;
+            if (k - k1 + 1 > sizeof(_URLSuffix))
+            {
+                return RC_ERR_RTSP_BAD_URL_SUFFIX;
+            }
             unsigned n = 0, k2 = k1+1;
 
-            while (k2 <= k) m_URLSuffix[n++] = CurRequest[k2++];
-            m_URLSuffix[n] = '\0';
+            while (k2 <= k)
+            {
+                _URLSuffix[n++] = curRequest[k2++];
+            }
+            _URLSuffix[n] = '\0';
 
-            if (k1 - i > sizeof(m_URLPreSuffix)) return false;
-            n = 0; k2 = i + 1;
-            while (k2 <= k1 - 1) m_URLPreSuffix[n++] = CurRequest[k2++];
-            m_URLPreSuffix[n] = '\0';
+            if (k1 - i > sizeof(_URLPreSuffix))
+            {
+                return RC_ERR_RTSP_BAD_URL_PRESUFFIX;
+            }
+            n = 0;
+            k2 = i + 1;
+            while (k2 <= k1 - 1)
+            {
+                _URLPreSuffix[n++] = curRequest[k2++];
+            }
+            _URLPreSuffix[n] = '\0';
             i = k + 7; 
             parseSucceeded = true;
             break;
         }
     }
-    if (!parseSucceeded) return false;
+    if (parseSucceeded == false)
+    {
+        return RC_ERR_RTSP_BAD_PARSING;
+    }
 
     // Look for "CSeq:", skip whitespace, then read everything up to the next \r or \n as 'CSeq':
     parseSucceeded = false;
-    for (j = i; (int)j < (int)(CurRequestSize-5); ++j) 
+    for (j = i; (int)j < (int)(curRequestSize - 5); ++j) 
     {
-        if (CurRequest[j]   == 'C' && CurRequest[j+1] == 'S' && 
-            CurRequest[j+2] == 'e' && CurRequest[j+3] == 'q' && 
-            CurRequest[j+4] == ':') 
+        if (strncmp("CSeq:", curRequest + j, 5) == 0)
         {
             j += 5;
-            while (j < CurRequestSize && (CurRequest[j] ==  ' ' || CurRequest[j] == '\t')) ++j;
-            unsigned n;
-            for (n = 0; n < sizeof(m_CSeq)-1 && j < CurRequestSize; ++n,++j) 
+            while (j < curRequestSize && (curRequest[j] ==  ' ' || curRequest[j] == '\t'))
             {
-                char c = CurRequest[j];
+                ++j;
+            }
+            unsigned n;
+            for (n = 0; n < sizeof(_cmdSeq) - 1 && j < curRequestSize; ++n,++j) 
+            {
+                char c = curRequest[j];
                 if (c == '\r' || c == '\n') 
                 {
                     parseSucceeded = true;
                     break;
                 }
-                m_CSeq[n] = c;
+                _cmdSeq[n] = c;
             }
-            m_CSeq[n] = '\0';
+            _cmdSeq[n] = '\0';
             break;
         }
     }
-    if (!parseSucceeded) return false;
-
-    // Also: Look for "Content-Length:" (optional)
-    for (j = i; (int)j < (int)(CurRequestSize-15); ++j) 
+    if (!parseSucceeded)
     {
-        if (CurRequest[j]    == 'C'  && CurRequest[j+1]  == 'o'  && 
-            CurRequest[j+2]  == 'n'  && CurRequest[j+3]  == 't'  && 
-            CurRequest[j+4]  == 'e'  && CurRequest[j+5]  == 'n'  && 
-            CurRequest[j+6]  == 't'  && CurRequest[j+7]  == '-'  && 
-            (CurRequest[j+8] == 'L' || CurRequest[j+8]   == 'l') &&
-            CurRequest[j+9]  == 'e'  && CurRequest[j+10] == 'n' && 
-            CurRequest[j+11] == 'g' && CurRequest[j+12]  == 't' && 
-            CurRequest[j+13] == 'h' && CurRequest[j+14] == ':') 
+        return RC_ERR_RTSP_BAD_PARSING;
+    }
+    // Also: Look for "Content-Length:" (optional)
+    for (j = i; (int)j < (int)(curRequestSize - 15); ++j) 
+    {
+        if (strncmp("Content-Length:", curRequest + j, sizeof("Content-Length:")) == 0 ||
+            strncmp("Content-Length:", curRequest + j, sizeof("Content-length:")) == 0)
         {
             j += 15;
-            while (j < CurRequestSize && (CurRequest[j] ==  ' ' || CurRequest[j] == '\t')) ++j;
+            while (j < curRequestSize && (curRequest[j] ==  ' ' || curRequest[j] == '\t'))
+            {
+                ++j;
+            }
             unsigned num;
-            if (sscanf(&CurRequest[j], "%u", &num) == 1) m_ContentLength = num;
+            if (sscanf(&curRequest[j], "%u", &num) == 1)
+            {
+                _сontentLength = num;
+            }
         }
     }
-    return true;
+    return RC_SUCCESS;
 };
 
-RTSP_CMD_TYPES CRtspSession::Handle_RtspRequest(char const * aRequest, unsigned aRequestSize)
+RetCode RTSPSession::Handle_RtspRequest(RTSP_Code& rtsp_code,
+                                    char const* aRequest,
+                                    const uint32_t aRequestSize)
 {
-    if (ParseRtspRequest(aRequest,aRequestSize))
+    RetCode ret = _parseRtspRequest(aRequest,aRequestSize);
+    if (ret == RC_SUCCESS)
     {
-        switch (m_RtspCmdType)
+        switch (_rtspCmdType)
         {
-            case RTSP_OPTIONS:  { Handle_RtspOPTION();   break; };
-            case RTSP_DESCRIBE: { Handle_RtspDESCRIBE(); break; };
-            case RTSP_SETUP:    { Handle_RtspSETUP();    break; };
-            case RTSP_PLAY:     { Handle_RtspPLAY();     break; };
+            case RTSP_OPTIONS:
+            {
+                _handle_RtspOPTION();
+                break;
+            };
+            case RTSP_DESCRIBE:
+            {
+                _handle_RtspDESCRIBE();
+                break;
+            };
+            case RTSP_SETUP:
+            {
+                _handle_RtspSETUP();
+                break;
+            };
+            case RTSP_PLAY:
+            {
+                _handle_RtspPLAY();
+                break;
+            };
             default: {};
         };
     };
-    return m_RtspCmdType;
+    rtsp_code = _rtspCmdType;
+    return ret;
 };
 
-void CRtspSession::Handle_RtspOPTION()
+RetCode RTSPSession::_handle_RtspOPTION()
 {
-    char   Response[1024];
+    char   response[1024];
 
-    _snprintf(Response,sizeof(Response),
+    RetCode ret = RC_ERR;
+    _snprintf(response, sizeof(response),
         "RTSP/1.0 200 OK\r\nCSeq: %s\r\n"
-        "Public: DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE\r\n\r\n",m_CSeq);
+        "Public: DESCRIBE, SETUP, TEARDOWN, PLAY, PAUSE\r\n\r\n", _cmdSeq);
 
-    send(m_RtspClient,Response,strlen(Response),0);   
+    if (-1 == send(_rtspClient, response, sizeof(response), 0))
+    {
+        return RC_ERR_BAD_TRANSMIT_TO_SOCKET;
+    }
+    else
+    {
+        ret = RC_SUCCESS;
+    }
+    return ret;
 }
 
-void CRtspSession::Handle_RtspDESCRIBE()
+RetCode RTSPSession::Handle_RtspDESCRIBE()
 {
     char   Response[1024];
     char   SDPBuf[1024];
